@@ -3,7 +3,6 @@
 from pyfar import Signal
 import numpy as np
 import cmath
-import math
 from scipy.special import legendre, hankel1
 
 import matplotlib.pyplot as plt
