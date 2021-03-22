@@ -97,7 +97,7 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
 
     # normalized distance - Eq. (5) in [1]
     rho = [radius / a for radius in r]
-    rho_0 = rho[0] # [radius / a for radius in r_0]
+    rho_0 = r_0 / a
 
     # normalized frequency - Eq. (4) in [1]
     norm_freq = (2 * np.pi * f * a) / c
@@ -149,7 +149,7 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
                     p2 = p1
                     p1 = p
 
-                pressure = ((rho_0 * cmath.exp(1j * (mu * r - mu * rho_0 - mu))) * summ / (1j * mu))
+                pressure = rho_0 * cmath.exp(1j * (mu * r - mu * rho_0 - mu)) * summ / (1j * mu)
                 dB = 20*np.log(np.abs(pressure)/(1))
                 h_upp_dB.append(dB)  
     return h_upp_dB
