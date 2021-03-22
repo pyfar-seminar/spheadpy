@@ -13,14 +13,12 @@ a = 0.0875     # radius of the sphere (m)
 r = [1e16, 0.8, 0.4, 0.2, 0.15, 0.125]      # distance from the center of the sphere to the source (m)
 r_0 = 100 * a  # distance of the source to the origin of co-coordinates
 theta = [0, 150/180*np.pi] # angle of incidence (rad) 
-f = 1000    # frequency (Hz)
 c = 343    # ambient speed of sound (m/s)
 threshold = 100 # min 50 
 
 # %% ---------------OLD HRTF Duda 1998------------------------------------
 def hrtf(a, r, theta, f, c, threshold):
     
-    h_upp = []
     h_upp_dB = []
 
     # normalized distance - Eq. (5) in [1]
@@ -49,11 +47,6 @@ def hrtf(a, r, theta, f, c, threshold):
 
                 # calculate the sum for m=0
                 term = zr / (za * (za - 1))
-
-                # check for NaNs
-                if np.isnan(term) == True:
-                    print(term, angle, r, mu)
-
                 summ = summ + term
 
                 # calculate sum for m=1
@@ -71,8 +64,12 @@ def hrtf(a, r, theta, f, c, threshold):
                     
                     # update the sum and recursive terms
                     term = ((2 * m + 1) * p * qr) / ((m + 1) * za * qa - qa1)  # might become NaN for low frequencies
-                    # idx = ~np.isnan(term)
-                    summ = summ + term  # (idx)
+                    
+                    # check for NaNs
+                    if np.isnan(term) == True:
+                        print(term, angle, r, mu)
+
+                    summ = summ + term  
                     
                     qr2 = qr1
                     qr1 = qr
@@ -86,19 +83,15 @@ def hrtf(a, r, theta, f, c, threshold):
                 h_upp_dB.append(dB)  
     return h_upp_dB
 
-# hrtf(a, r, theta, f, c, threshold)
-
 # %% ---------------Off Ear HRTF ------------------------------------
 def new_hrtf(a, r, r_0, theta, f, c, threshold):
     
-    # H = np.zeros((1, len(theta)))
-    h_upp = []
     h_upp_dB = []
 
     # normalized distance - Eq. (5) in [1]
     rho = [radius / a for radius in r]
     rho_0 = r_0 / a
-
+    
     # normalized frequency - Eq. (4) in [1]
     norm_freq = (2 * np.pi * f * a) / c
     
@@ -139,8 +132,12 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
                     
                     # update the sum and recursive terms
                     term = ((2 * m + 1) * p * qr) / ((m + 1) * za * qa - qa1)  # might become NaN for low frequencies
-                    # idx = ~np.isnan(term)
-                    summ = summ + term  # (idx)
+                    
+                    # check for NaNs
+                    if np.isnan(term) == True:
+                        print(term, angle, r, mu)
+
+                    summ = summ + term  
                     
                     qr2 = qr1
                     qr1 = qr
@@ -154,7 +151,6 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
                 h_upp_dB.append(dB)  
     return h_upp_dB
 
-# new_hrtf(a, r, r_0, theta, f, c, threshold)
 
 # %% -------------------info prints----------------------------------
 f_low = round((0.1*c)/(2*np.pi*a), 2)
@@ -182,18 +178,18 @@ len_plot = int(len(HRTF_freq_dB)/(len(r)*len(theta)))
 l_size = 3
 
 plt.figure(figsize=(20,10))
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[:len_plot], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot:len_plot*2], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*2:len_plot*3], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*3:len_plot*4], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*4:len_plot*5], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*5:len_plot*6], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e17$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e17$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[:len_plot], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot:len_plot*2], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*2:len_plot*3], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*3:len_plot*4], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*4:len_plot*5], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*5:len_plot*6], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
 plt.xlim([0.1,100])
 
 # vertical lines
@@ -219,18 +215,18 @@ len_plot = int(len(off_ear_freq_dB)/(len(r)*len(theta)))
 l_size = 3
 
 plt.figure(figsize=(20,10))
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[:len_plot], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot:len_plot*2], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*2:len_plot*3], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*3:len_plot*4], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*4:len_plot*5], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*5:len_plot*6], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e17$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e17$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[:len_plot], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot:len_plot*2], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*2:len_plot*3], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*3:len_plot*4], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*4:len_plot*5], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*5:len_plot*6], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
 plt.xlim([0.1,100])
 
 # vertical lines
@@ -244,7 +240,7 @@ for tick in position:
 plt.vlines(mu_20k, -65, 45, colors='r', linestyle='-', linewidth=1.5, label='20 kHz')
 plt.grid(color='k', linestyle=':', linewidth=2)
 
-# plt.ylim(-130, -35)
+# plt.ylim(-130, 200)
 plt.title('Effect of range on the magnitude response - Off Ear', fontsize=20)
 plt.ylabel('Response (dB)', fontsize=15)
 plt.xlabel(r'Normierte Frequenz: $\mu = \frac{2\pi fa}{c}$', fontsize=15)
