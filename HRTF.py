@@ -2,6 +2,7 @@
 
 from pyfar import Signal
 import numpy as np
+import numpy.matlib
 import cmath
 from scipy.special import legendre, hankel1
 
@@ -251,4 +252,200 @@ plt.legend(prop={'size': 18})
 plt.show()
 
 
-# %%
+# %% Great Circle Distance
+def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], offCenter = False, a = 0.0875, r_0 = 100*a, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
+    '''calculates head-realated impulse responses (HRIRs) of a spherical head
+        model with offset ears using the formulation from according to [1]. HRIRs
+        are calculated by dividing the pressure on the sphere by the free field
+        essure of a point source in the origin of coordinates.
+        See AKsphericalHeadDemo.m for example use cases
+        Additional information on the model itself can be found in
+        2_Tools/SphericalHarmonics/AKsphericalHead.pdf
+    Params:
+        sg        - [N x 3] matrix with the spatial sampling grid, where the
+                    first column specifies the azimuth (0 deg. = front,
+                    90 deg. = left), the second column the elevation
+                    (90 deg. = above, 0 deg. = front, -90 deg. = below), and the
+                    third column the radius [m]. If only two columns are given
+                    the radius is set to a*100 (see below)
+                    (default: AKgreatCircleGrid(90:-10:-90, 10, 90) )
+        ear       - four element vector that specifies position of left and right
+                    ear: [azimuth_l elevation_l azimuth_r elevation_r]. If only
+                    two values are passed, symmetrical ears are assumed.
+                    (defualt = [85 -13], average values from [2], Tab V,
+                    condition All, O-A) 
+        offCenter - false   : the spherical head is centered in the coordinate
+                            system (default)
+                    true    : the interaural axis (i.e., the connection between
+                            the two ears) is centered. This is done be
+                            averaging the ear azimuth and elevation, and
+                            and a translation the sampling grid
+                    [x y z] : x/y/z coordinates of the center of the sphere [m].
+                            E.g., [-4e3 1e3 2e3] moves the spherical head 4 mm
+                            to the back, 1 mm to the left (left ear away from
+                            the origin of coordinates) and 2 mm up.
+        a         - radius of the spherical head in m (default = 0.0875)
+        r_0       - distance of the free-field point source in m that used as
+                    reference (by default the radius from the sampling grid is
+                    taken: r_0 = sg(1,3) )
+        Nsh       - spherical harmonics order (default = 100)
+        Nsamples  - length in samples (default = 1024)
+        fs        - sampling rate in Hz (default = 44100)
+        c         - speed of sound [m/s] (default = 343)
+
+    Returns:
+        h                  - spherical head impulse responses given in matrix of
+                            size [Nsamples x N x 2]: Left ear = h(:,:,1),
+                            right ear = h(:,:,2)
+        offCenterParameter - spherical head model parameters after translation
+                            and changing the ear position (if applied)
+
+                            ear    : new ear position (see above)
+                            sg     : new sampling grid (see above)
+                            r      : radius for each point of sg
+                            azRot  : rotation above z-axis (azimuth) that was
+                                    applied to get the new ear azimuth
+                            elRot  : rotation above x-axis (elevation) that was
+                                    applied to get the new ear elevation
+                            xTrans : translation of the spherical head in x-
+                                    direction, that was applied to center the
+                                    interaural axis
+                            zTrans : translation of the spherical head in z-
+                                    direction, that was applied to center the
+                                    interaural axis'''
+    
+    offCenterParameter = {}
+
+    #  --- set default parameters ---
+    if sg.shape[1] < 3:
+        r_0 = 100*a
+    else:
+        r_0 = sg[0,2]
+
+    # check format of the sampling grid
+    if sg.shape[1] < 3:
+        sg = sg + [r_0 * np.ones(sg.shape[0], 1)]
+
+    # check format of ear vector
+    if len(ear) == 2:
+        ear = ear + [360 - ear[0], ear[1]]
+
+    # rotate and translate the spherical head
+    # center the interaural axis
+    if offCenter == True:
+        # sampling grid in carthesian coordinates
+        sgX, sgY, sgZ = utils.sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
+        
+        # translate the sampling grid
+        sgX = sgX - offCenter[0]
+        sgY = sgY - offCenter[1]
+        sgZ = sgZ - offCenter[2]
+        
+        # translated sampling grid in spherical coordinates
+        sgAz, sgEl, sgR   = utils.cart2sph(sgX, sgY, sgZ)
+        sg                = [sgAz/pi*180, sgEl/pi*180, sgR]
+        sg                = round(sg*10000) / 10000
+        sg[:,0]           = sg[:,0]%360
+        
+        # save parameter
+        offCenterParameter['sg'] = sg
+        
+        del [sgX, sgY, sgZ, sgAz, sgEl, sgR]
+
+    elif offCenter == False: 
+        # check if the ear azimuths are symmetrical
+        if ear[0] != 360-ear[2]:
+            earAz = np.mean([ear[0], 360-ear[2]])
+            offCenterParameter['azimuthRotation'] = earAz - ear[0]
+            ear[1, 3] = [earAz 360-earAz]
+            del earAz
+        else:
+            offCenterParameter['azimuthRotation'] = 0
+
+        
+        # check if the ear elevations are symmetrical
+        if ear[1] != ear[3]:
+            earEl = np.mean([ear[1], ear[3]])
+            offCenterParameter['elevation']         = earEl
+            offCenterParameter['elevationRotation'] = earEl - ear[1]
+            ear[2,4] = earEl
+            del earEl
+        else:
+            offCenterParameter['elevationRotation'] = 0
+        
+        #sampling grid in carthesian coordinates
+        sgX, sgY, sgZ = utils.sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
+        doTranslate   = False
+        
+        # check for translation in x-direction (front/back)
+        if ear[0] != 90:
+            offCenterParameter['xTranslation'] = np.sin(ear[0] - 90) * a
+            doTranslate = True
+            sgX         = sgX - offCenterParameter['xTranslation']
+        else:
+            offCenterParameter['xTranslation'] = 0
+        
+        # check for translation in z-direction (up/down)
+        if ear[1] != 0:
+            offCenterParameter['zTranslation'] = np.sin(-ear[1]) * a
+            doTranslate = True
+            sgZ         = sgZ - offCenterParameter['zTranslation']
+        else:
+            offCenterParameter['zTranslation'] = 0
+        
+        # transform grid to spherical coordinates again
+        if doTranslate:
+            sgAz, sgEl, sgR   = utils.cart2sph(sgX, sgY, sgZ)
+            sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
+            sg                = round(sg*10000) / 10000
+            sg[:,0]           = sg[:,0] % 360
+        
+        offCenterParameter['sg']  = sg
+        offCenterParameter['ear'] = ear
+
+        del [earAz, earEl, sgX, sgY, sgZ, sgAz, sgEl, sgR, doTranslate]
+        
+    else:
+        offCenterParameter = False 
+
+    # check parameter values
+    if any(sg[:,2] < a) or r_0 < a:
+        print('AKsphericalHead:Input', 'sg(:,3), and r_0 must be larger than a')
+
+    # spherical head model
+    # calculate great circle distances between the sampling grid and the ears
+    gcd = np.matrix([[np.arccos(np.sin(sg[:, 1]) * np.sin(ear[1]) + np.cos(sg[:, 1]) * np.cos(ear[1]) * np.cos(sg[:, 0] - ear[0]))], 
+                     [np.arccos(np.sin(sg[:, 1]) * np.sin(ear[3]) + np.cos(sg[:, 1]) * np.cos(ear[3]) * np.cos(sg[:, 0] - ear[2]))]])
+
+    # get unique list of great circle distances and radii
+    [GCD, ~, gcdID] = np.unique([gcd np.matlib(sg[:, 2], 2, 1)], axis=0)  # <---------
+    # gcd = reshape(GCD(gcdID), size(gcd))
+    r   = GCD[:,1]
+    GCD = GCD[:,0]
+
+    # get list of frequencies to be calculated
+    f = list(range(0, fs/2, fs/Nsamples)) 
+
+    # calculate complex the transfer function in the frequency domain
+    H = new_hrtf(a, r, r_0, GCD/180*np.pi, f, c, Nsh)
+
+    # set 0 Hz bin to 1 (0 dB)
+    H[0,:] = 1
+
+    # make sure bin at fs/2 is real
+    if f[end] == fs/2:
+        H[end,:] = abs(H[end,:])
+
+    # mirror the spectrum
+    H = AKsingle2bothSidedSpectrum(H, 1 - Nsamples%2)
+
+    # get the impuse responses
+    hUnique = np.fft.ifft(H)
+
+    # add delay to shift the pulses away from the very start
+    hUnique = circshift(hUnique, [round(1.5e-3*fs) 0])
+
+    # resort to match the desired sampling grid
+    h = np.zeros(Nsamples, size(sg,1), 2)
+    h[:,:,0] = hUnique(:, gcdID(1:size(sg,1) )    )
+    h[:,:,1] = hUnique(:, gcdID(size(sg,1)+1:end) )
