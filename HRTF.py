@@ -3,6 +3,7 @@
 from pyfar import Signal
 import numpy as np
 import numpy.matlib
+import pygplates
 import math 
 import cmath
 from scipy.special import legendre, hankel1
@@ -270,14 +271,13 @@ def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0,
     # functions of an artificial head with a high directional resolution,
     # R.W. Sinnott, "Virtues of the Haversine", Sky and Telescope, vol. 68, no.
     # 2, 1984, p. 159)
-    
-    print(np.sin(np.deg2rad(max_ang/2))/np.cos(np.deg2rad(el)))
-    d_phi = [2*math.asin(np.deg2rad(np.sin(np.deg2rad(max_ang/2))/np.cos(np.deg2rad(i)))) for i in el]
+
+    d_phi = [np.rad2deg(2*np.arcsin(np.sin(np.deg2rad(max_ang/2))/np.cos(np.deg2rad(i)))) for i in el]
 
     # correct values at the poles
-    abs_el = [abs(i) for i in el]
-    idx_90 = numpy.where(abs_el == 90)
-    d_phi[idx_90] = 360
+    abs_el = np.array([abs(i) for i in el])
+    idx_90 = np.where(abs_el == 90)
+    d_phi = [360 if element ==90 else d_phi[i] for i, element in enumerate(abs_el)]
 
     # round to desired angular resolution
     d_phi = [int(i / res_ang) * res_ang for i in d_phi]   # floor / int
@@ -290,61 +290,83 @@ def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0,
     for n in range(len(d_phi)):
         if abs(el[n]) != 90:
             while fit % d_phi[n]:
-                print(d_phi[n], res_ang)
                 d_phi[n] = round((d_phi[n] - res_ang) / res_ang) * res_ang
         else:
             # irregularity at north and south pole
             d_phi[n] = 360
     
     act_ang = d_phi
-    del n
+    # del n
 
     # calculate great circle angle that is actually used in the grid
     # (R.W. Sinnott, "Virtues of the Haversine", Sky and Telescope, vol. 68, no. 2, 1984, p. 159)
-    act_ang_GCD = 2*np.arcsin(np.sqrt(np.cos(el)**2*np.sin(d_phi/2)**2))
+    act_ang_GCD = [np.rad2deg(2*np.arcsin(np.sqrt(np.cos(np.deg2rad(e))**2*np.sin(np.deg2rad(phi/2))**2))) for phi, e in zip(d_phi,el)]
 
     # construct pre-grid
-    hrtf_grid = []
+    hrtf_grid = np.zeros((100000,2))  # <================ initiliaze correctly
+
     m = 0
     for n in range(len(d_phi)):
-        tmp = range(0, 360-d_phi[n], d_phi[n])
-        hrtf_grid[m:m+length[tmp]-1, 0] = tmp
-        hrtf_grid[m:m+length[tmp]-1, 1] = el[n]
-        m += length[tmp]
+        tmp = np.arange(0,360-d_phi[n],d_phi[n])
+        if len(tmp) == 0:
+            tmp = 0
+        
+            hrtf_grid[m:m+1, 0] = tmp
+            hrtf_grid[m:m+1, 1] = el[n]
+            m += tmp
+
+        else:
+            hrtf_grid[m:m+len(tmp), 0] = tmp
+            hrtf_grid[m:m+len(tmp), 1] = el[n]
+            m += len(tmp)
 
     #final grid in degree
     hrtf_grid_deg = hrtf_grid
 
     # estimated area weights using lat-long rectangles
-    weights       = nan(hrtf_grid_deg.shape[0], 1)
-    [el_sort, id] = sort(el)
-    act_ang_sort  = act_ang[id]
+    weights = np.empty((hrtf_grid_deg.shape[0],1)) 
+    el_sort = np.sort(el)
+
+    # [el_sort, id] = sort(el)
+    # act_ang_sort  = act_ang[id]
 
     for n in range(len(act_ang)):
+        print(n)
         if len(act_ang) == 1:
             weight = 1
 
         elif el_sort[n] == -90:
-            el_range = [-90, np.mean(el_sort[n:n+1])]
-            weight   = area_quad(el_range[0], -180, el_range[1], 180)
+            print(np.mean(el_sort[n:n+2]))
+            el_range = [-90, np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
+            weight   = area_quad(el_range[0], -180, el_range[1], 180)  # <====== what is the Python equivalent? area_quad
+
         elif el_sort[n] == 90:
-            el_range = [90, np.mean(el_sort[n-1:n])]
+            print(np.mean(el_sort[n-1:n]))
+            el_range = [90, np.mean(el_sort[n-1:n])] 
             weight   = area_quad(el_range[0], -180, el_range[1], 180)
 
         else:
             if n == 1:
                 el_diff  = ( el_sort[n+1]-el_sort[n] ) / 2
                 el_range = el_sort[n] + [-el_diff, el_diff]
-                weight   = area_quad(el_range[1], 0, el_range[2], act_ang_sort[n])
+                weight   = area_quad(el_range[1], 0, el_range[2], act_ang[n])
             elif n == len(act_ang):
                 el_diff  = ( el_sort[n]-el_sort[n-1] ) / 2
                 el_range = el_sort[n] + [-el_diff, el_diff]
-                weight   = area_quad(el_range[0], 0, el_range[1], act_ang_sort[n])
+                weight   = area_quad(el_range[0], 0, el_range[1], act_ang[n])
             else:
-                el_range = [np.mean(el_sort[n-1:n]), np.mean(el_sort[n:n+1])]
-                weight   = area_quad(el_range[0], 0, el_range[1], act_ang_sort[n])
+                el_range = [np.mean(el_sort[n-1:n]), np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
+                weight   = area_quad(el_range[0], 0, el_range[1], act_ang[n])
         
-        weights[hrtf_grid_deg[:,1] == el_sort[n]] = weight
+        # weights[hrtf_grid_deg[:,1] == el_sort[n]] = weight
+
+        # convert frm to a numpy array:
+        frm = np.array(weights)
+        # create a copy of frm so you don't modify original array:
+        to = frm.copy()
+        # mask to, and insert your replacement values:
+        mask = [i == el_sort[n] for i in hrtf_grid_deg[:,1]]
+        to[mask] = weight
         
     weights = weights / sum(weights)
 
