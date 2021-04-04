@@ -3,10 +3,9 @@
 from pyfar import Signal
 import numpy as np
 import numpy.matlib
-import pygplates
 import math 
 import cmath
-from scipy.special import legendre, hankel1
+# import sfs
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
@@ -254,6 +253,17 @@ plt.legend(prop={'size': 18})
 plt.show()
 
 
+# %% quadarea
+def quadarea(lat1, lon1, lat2, lon2):
+    h = np.sin(lat2)-np.sin(lat1)
+    Az = 2 * np.pi * h
+    Aq = Az * (lon2-lon1)/(2*np.pi)
+
+    A = (np.sin(np.deg2rad(lat2))-np.sin(np.deg2rad(lat1))) * np.deg2rad(lon2-lon1) / (4*np.pi)
+    print(Aq/(4*np.pi))
+    return A
+
+quadarea(-90,-180,-89,180)
 # %% AKgreatCircleGrid
 def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0, res_ang=1):
 
@@ -296,84 +306,66 @@ def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0,
             d_phi[n] = 360
     
     act_ang = d_phi
-    # del n
 
     # calculate great circle angle that is actually used in the grid
     # (R.W. Sinnott, "Virtues of the Haversine", Sky and Telescope, vol. 68, no. 2, 1984, p. 159)
     act_ang_GCD = [np.rad2deg(2*np.arcsin(np.sqrt(np.cos(np.deg2rad(e))**2*np.sin(np.deg2rad(phi/2))**2))) for phi, e in zip(d_phi,el)]
 
     # construct pre-grid
-    hrtf_grid = np.zeros((100000,2))  # <================ initiliaze correctly
+    hrtf_grid = [] 
 
     m = 0
     for n in range(len(d_phi)):
-        tmp = np.arange(0,360-d_phi[n],d_phi[n])
-        if len(tmp) == 0:
-            tmp = 0
-        
-            hrtf_grid[m:m+1, 0] = tmp
-            hrtf_grid[m:m+1, 1] = el[n]
-            m += tmp
-
-        else:
-            hrtf_grid[m:m+len(tmp), 0] = tmp
-            hrtf_grid[m:m+len(tmp), 1] = el[n]
-            m += len(tmp)
+        tmp = np.arange(0, 360-d_phi[n]+1, d_phi[n])
+        for i in tmp:
+            hrtf_grid.append([i, el[n]])
+        m += len(tmp)
 
     #final grid in degree
     hrtf_grid_deg = hrtf_grid
-
     # estimated area weights using lat-long rectangles
-    weights = np.empty((hrtf_grid_deg.shape[0],1)) 
+    weights = np.zeros((len(hrtf_grid_deg),1)) 
     el_sort = np.sort(el)
 
-    # [el_sort, id] = sort(el)
-    # act_ang_sort  = act_ang[id]
-
     for n in range(len(act_ang)):
-        print(n)
         if len(act_ang) == 1:
             weight = 1
 
         elif el_sort[n] == -90:
-            print(np.mean(el_sort[n:n+2]))
             el_range = [-90, np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
-            weight   = area_quad(el_range[0], -180, el_range[1], 180)  # <====== what is the Python equivalent? area_quad
+            weight   = quadarea(el_range[0], -180, el_range[1], 180)  
 
         elif el_sort[n] == 90:
-            print(np.mean(el_sort[n-1:n]))
-            el_range = [90, np.mean(el_sort[n-1:n])] 
-            weight   = area_quad(el_range[0], -180, el_range[1], 180)
+            el_range = [90, np.mean(el_sort[n-1:n+1])] 
+            weight   = quadarea(el_range[0], -180, el_range[1], 180)
 
         else:
-            if n == 1:
+            if n == 0:
                 el_diff  = ( el_sort[n+1]-el_sort[n] ) / 2
                 el_range = el_sort[n] + [-el_diff, el_diff]
-                weight   = area_quad(el_range[1], 0, el_range[2], act_ang[n])
+                weight   = quadarea(el_range[0], 0, el_range[1], act_ang[n])
             elif n == len(act_ang):
                 el_diff  = ( el_sort[n]-el_sort[n-1] ) / 2
                 el_range = el_sort[n] + [-el_diff, el_diff]
-                weight   = area_quad(el_range[0], 0, el_range[1], act_ang[n])
+                weight   = quadarea(el_range[0], 0, el_range[1], act_ang[n])
             else:
-                el_range = [np.mean(el_sort[n-1:n]), np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
-                weight   = area_quad(el_range[0], 0, el_range[1], act_ang[n])
+                # print(el_sort[n-1:n+1], el_sort[n:n+2])
+                el_range = [np.mean(el_sort[n-1:n+1]), np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
+                weight   = quadarea(el_range[0], 0, el_range[1], act_ang[n])
         
-        # weights[hrtf_grid_deg[:,1] == el_sort[n]] = weight
+        hrtf_grid_deg = np.array(hrtf_grid_deg)
+        for i, element in enumerate(hrtf_grid_deg[:, 1]):
+            if element == el_sort[n]:
+                weights[i] = weight
 
-        # convert frm to a numpy array:
-        frm = np.array(weights)
-        # create a copy of frm so you don't modify original array:
-        to = frm.copy()
-        # mask to, and insert your replacement values:
-        mask = [i == el_sort[n] for i in hrtf_grid_deg[:,1]]
-        to[mask] = weight
-        
     weights = weights / sum(weights)
+
+    return [hrtf_grid_deg, act_ang_GCD, act_ang, weights]
 
 AKgreatCircleGrid()
 
 # %% AKsphericalHead
-def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], offCenter = False, a = 0.0875, r_0 = 100*a, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
+def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0, res_ang=1), ear = [85, -13], offCenter = False, a = 0.0875, r_0 = 100*0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
     '''calculates head-realated impulse responses (HRIRs) of a spherical head
         model with offset ears using the formulation from according to [1]. HRIRs
         are calculated by dividing the pressure on the sphere by the free field
@@ -444,7 +436,8 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
 
     # check format of the sampling grid
     if sg.shape[1] < 3:
-        sg = sg + [r_0 * np.ones(sg.shape[0], 1)]
+        print(sg.shape)
+        sg = np.hstack((sg, r_0 * np.ones((sg.shape[0], 1))))  
 
     # check format of ear vector
     if len(ear) == 2:
@@ -454,16 +447,16 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
     # center the interaural axis
     if offCenter == True:
         # sampling grid in carthesian coordinates
-        sgX, sgY, sgZ = utils.sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
+        sgX, sgY, sgZ = sfs.util.sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
         
-        # translate the sampling grid
+        # translate the samplingv grid
         sgX = sgX - offCenter[0]
         sgY = sgY - offCenter[1]
         sgZ = sgZ - offCenter[2]
         
         # translated sampling grid in spherical coordinates
-        sgAz, sgEl, sgR   = utils.cart2sph(sgX, sgY, sgZ)
-        sg                = [sgAz/pi*180, sgEl/pi*180, sgR]
+        sgAz, sgEl, sgR   = sfs.util.cart2sph(sgX, sgY, sgZ)
+        sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
         sg                = round(sg*10000) / 10000
         sg[:,0]           = sg[:,0]%360
         
@@ -477,7 +470,8 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
         if ear[0] != 360-ear[2]:
             earAz = np.mean([ear[0], 360-ear[2]])
             offCenterParameter['azimuthRotation'] = earAz - ear[0]
-            ear[1, 3] = [earAz 360-earAz]
+            for i, el in zip([0,2], [earAz, 360-earAz]):
+                ear[i] = el
             del earAz
         else:
             offCenterParameter['azimuthRotation'] = 0
@@ -488,13 +482,14 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
             earEl = np.mean([ear[1], ear[3]])
             offCenterParameter['elevation']         = earEl
             offCenterParameter['elevationRotation'] = earEl - ear[1]
-            ear[2,4] = earEl
+            for i in [1,3]:
+                ear[i] = earEl
             del earEl
         else:
             offCenterParameter['elevationRotation'] = 0
         
         #sampling grid in carthesian coordinates
-        sgX, sgY, sgZ = utils.sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
+        sgX, sgY, sgZ = sfs.util.sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
         doTranslate   = False
         
         # check for translation in x-direction (front/back)
@@ -515,7 +510,7 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
         
         # transform grid to spherical coordinates again
         if doTranslate:
-            sgAz, sgEl, sgR   = utils.cart2sph(sgX, sgY, sgZ)
+            sgAz, sgEl, sgR   = sfs.util.cart2sph(sgX, sgY, sgZ)
             sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
             sg                = round(sg*10000) / 10000
             sg[:,0]           = sg[:,0] % 360
@@ -538,7 +533,8 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
                      [np.arccos(np.sin(sg[:, 1]) * np.sin(ear[3]) + np.cos(sg[:, 1]) * np.cos(ear[3]) * np.cos(sg[:, 0] - ear[2]))]])
 
     # get unique list of great circle distances and radii
-    GCD, gcdID = np.unique([gcd np.matlib(sg[:, 2], 2, 1)], axis=0, return_inverse=True)  # <---------
+    gcd_sg = np.hstack((gcd, sg[:, 2]))
+    GCD, gcdID = np.unique(gcd_sg, axis=0, return_inverse=True)  
     # gcd = reshape(GCD(gcdID), size(gcd))
     r   = GCD[:,1]
     GCD = GCD[:,0]
@@ -563,12 +559,13 @@ def AKsphericalHead(sg = AKgreatCircleGrid(90:-10:-90, 10, 90), ear = [85 -13], 
     hUnique = np.fft.ifft(H)
 
     # add delay to shift the pulses away from the very start
-    hUnique = circshift(hUnique, [round(1.5e-3*fs) 0])
+    hUnique = np.roll(hUnique, round(1.5e-3*fs), axis=0)
 
     # resort to match the desired sampling grid
-    h = np.zeros(Nsamples, size(sg,1), 2)
-    h[:,:,0] = hUnique(:, gcdID(1:size(sg,1) )    )
-    h[:,:,1] = hUnique(:, gcdID(size(sg,1)+1:end) )
+    h = np.zeros((Nsamples, sg.shape[0], 2))
+    h[:,:,0] = hUnique[:, gcdID[1:sg.shape[0]+1]]
+    h[:,:,1] = hUnique[:, gcdID[sg.shape[0]+1:end]]
 
+AKsphericalHead()
 # %%
 
