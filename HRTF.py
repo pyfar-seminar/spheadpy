@@ -2,13 +2,11 @@
 
 from pyfar import Signal
 import numpy as np
-import numpy.matlib
-import math 
+# import numpy.matlib
 import cmath
-# import sfs
 
 import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
+# from matplotlib.ticker import ScalarFormatter
 
 # %% ---------------Define Variables------------------------------------
 a = 0.0875     # radius of the sphere (m)
@@ -98,14 +96,19 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
     # rho_0 = r_0 / a
     
     # normalized frequency - Eq. (4) in [1]
-    norm_freq = (2 * np.pi * f * a) / c
+    norm_freq = [(2 * np.pi * freq * a) / c for freq in f]
     
     for angle in theta:
         x = np.cos(angle)
         for r in rho:
             for mu in norm_freq:
-                zr = 1 / (1j * mu * r)
-                za = 1 / (1j * mu)
+                if mu == 0:
+                    zr = float('inf')
+                    za = float('inf')
+                else:
+                    zr = 1 / (1j * mu * r)
+                    za = 1 / (1j * mu)
+
                 qr2 = zr
                 qr1 = zr * (1 - zr)
                 qa2 = za
@@ -137,11 +140,7 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
                     
                     # update the sum and recursive terms
                     term = ((2 * m + 1) * p * qr) / ((m + 1) * za * qa - qa1)  # might become NaN for low frequencies
-                    
-                    # check for NaNs
-                    if np.isnan(term) == True:
-                        print(term, angle, r, mu)
-
+                
                     summ = summ + term  
                     
                     qr2 = qr1
@@ -255,9 +254,9 @@ plt.show()
 
 # %% quadarea
 def quadarea(lat1, lon1, lat2, lon2):
-    h = np.sin(lat2)-np.sin(lat1)
-    Az = 2 * np.pi * h
-    Aq = Az * (lon2-lon1)/(2*np.pi)
+    # h = np.sin(lat2)-np.sin(lat1)
+    # Az = 2 * np.pi * h
+    # Aq = Az * (lon2-lon1)/(2*np.pi)
 
     A = (np.sin(np.deg2rad(lat2))-np.sin(np.deg2rad(lat1))) * np.deg2rad(lon2-lon1) / (4*np.pi)
     return A
@@ -280,7 +279,7 @@ def sph2cart(az, el, r):
     z = r * np.sin(el)
     return x, y, z
 
-# %% 
+# %% AKsingle2bothSidedSpectrum
 # both_sided = AKsingle2bothSidedSpectrum(single_sided, is_even)
 #
 # can be used to switch back and forth between single and both sided
@@ -330,21 +329,21 @@ def AKsingle2bothSidedSpectrum(single_sided, is_even=1):
     if is_even:
         # make sure that the bin at nyquist frequency is real
         # (there might be rounding errors that produce small immaginary parts)
-        single_sided[-1,:,:] = (single_sided[-1,:,:]).real
+        single_sided[-1,:] = [float(i) for i in single_sided[-1,:]]
         # mirror the spectrum
-        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N,:, :])))) 
+        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N-1,:])))) 
     else:
         # mirror the spectrum
-        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N+1,:, :]))))
+        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N+1,:]))))
 
     # make sure that the bin at 0 Hz is real
     # (there might be rounding errors that produce small immaginary parts)
-    both_sided[0,:,:] = (both_sided[0,:,:]).real
+    both_sided[0,:] = [float(i) for i in both_sided[0,:]]
 
     return both_sided
 
 # %% AKgreatCircleGrid
-def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0, res_ang=1):
+def AKgreatCircleGrid(el=list(range(90, -92, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1):
 
     # check input format
     # el = reshape(el, [numel(el) 1]);
@@ -365,7 +364,6 @@ def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0,
 
     # correct values at the poles
     abs_el = np.array([abs(i) for i in el])
-    # idx_90 = np.where(abs_el == 90)
     d_phi = [360 if element == 90 else d_phi[i] for i, element in enumerate(abs_el)]
 
     # round to desired angular resolution
@@ -393,12 +391,10 @@ def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0,
     # construct pre-grid
     hrtf_grid = [] 
 
-    m = 0
     for n in range(len(d_phi)):
         tmp = np.arange(0, 360-d_phi[n]+1, d_phi[n])
         for i in tmp:
             hrtf_grid.append([i, el[n]])
-        m += len(tmp)
 
     #final grid in degree
     hrtf_grid_deg = hrtf_grid
@@ -444,7 +440,7 @@ def AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0,
 AKgreatCircleGrid()
 
 # %% AKsphericalHead
-def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=2, fit=90, do_plot=0, res_ang=1), ear = [85, -13], offCenter = False, a = 0.0875, r_0 = 100*0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
+def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -100, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1), ear = [85, -13], offCenter = False, a = 0.0875, r_0 = 100*0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
     '''calculates head-realated impulse responses (HRIRs) of a spherical head
         model with offset ears using the formulation from according to [1]. HRIRs
         are calculated by dividing the pressure on the sphere by the free field
@@ -507,7 +503,9 @@ def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=
     
     offCenterParameter = {}
 
-    print(f'sg {sg}')
+    # get hrtf_grid_deg from AKgreatCircleGrid output --> [hrtf_grid_deg, act_ang_GCD, act_ang, weights]
+    sg = sg[0]
+  
     #  --- set default parameters ---
     if sg.shape[1] < 3:
         r_0 = 100*a
@@ -524,7 +522,7 @@ def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=
 
     # rotate and translate the spherical head
     # center the interaural axis
-    if offCenter == True:
+    if isinstance(offCenter, list):
         # sampling grid in carthesian coordinates
         sgX, sgY, sgZ = sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
         
@@ -536,15 +534,18 @@ def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=
         # translated sampling grid in spherical coordinates
         sgAz, sgEl, sgR   = cart2sph(sgX, sgY, sgZ)
         sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
-        sg                = round(sg*10000) / 10000
-        sg[:,0]           = sg[:,0]%360
+        sg                = [np.reshape(i, (len(i),1)) for i in sg]
+        sg                = np.hstack((sg[0], sg[1], sg[2]))
+        for i in range(sg.shape[1]):     
+            sg[:,i] = [round(x*10000)/10000 for x in sg[:,i]] 
+        sg[:,0] = [x%360 for x in sg[:,0]]
         
         # save parameter
         offCenterParameter['sg'] = sg
         
         del [sgX, sgY, sgZ, sgAz, sgEl, sgR]
 
-    elif offCenter == False: 
+    elif offCenter == True: 
         # check if the ear azimuths are symmetrical
         if ear[0] != 360-ear[2]:
             earAz = np.mean([ear[0], 360-ear[2]])
@@ -591,15 +592,16 @@ def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=
         if doTranslate:
             sgAz, sgEl, sgR   = cart2sph(sgX, sgY, sgZ)
             sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
-            sg                = round(sg*10000) / 10000
-            sg[:,0]           = sg[:,0] % 360
-        
+            sg                = [np.reshape(i, (len(i),1)) for i in sg]
+            sg                = np.hstack((sg[0], sg[1], sg[2]))
+            for i in range(sg.shape[1]):     
+                sg[:,i] = [round(x*10000)/10000 for x in sg[:,i]] 
+            sg[:,0] = [x%360 for x in sg[:,0]]
+
         offCenterParameter['sg']  = sg
         offCenterParameter['ear'] = ear
-
-        del [earAz, earEl, sgX, sgY, sgZ, sgAz, sgEl, sgR, doTranslate]
         
-    else:
+    elif offCenter == False:
         offCenterParameter = False 
 
     # check parameter values
@@ -608,21 +610,33 @@ def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=
 
     # spherical head model
     # calculate great circle distances between the sampling grid and the ears
-    gcd = np.matrix([[np.arccos(np.sin(sg[:, 1]) * np.sin(ear[1]) + np.cos(sg[:, 1]) * np.cos(ear[1]) * np.cos(sg[:, 0] - ear[0]))], 
-                     [np.arccos(np.sin(sg[:, 1]) * np.sin(ear[3]) + np.cos(sg[:, 1]) * np.cos(ear[3]) * np.cos(sg[:, 0] - ear[2]))]])
+    arr1 = np.arccos(np.sin(sg[:, 1]) * np.sin(ear[1]) + np.cos(sg[:, 1]) * np.cos(ear[1]) * np.cos(sg[:, 0] - ear[0]))
+    arr1 = np.reshape(arr1, (len(arr1),1))
 
+    arr2 = np.arccos(np.sin(sg[:, 1]) * np.sin(ear[3]) + np.cos(sg[:, 1]) * np.cos(ear[3]) * np.cos(sg[:, 0] - ear[2]))
+    arr2 = np.reshape(arr2, (len(arr2),1))
+
+    gcd = np.vstack((arr1, arr2))
+   
+    rep = 2
+    radii = np.reshape(np.repeat(sg[:, 2], rep), (rep*len(sg[:, 2]),1)) 
+   
     # get unique list of great circle distances and radii
-    gcd_sg = np.hstack((gcd, sg[:, 2]))
+    gcd_sg = np.hstack((gcd, radii))
     GCD, gcdID = np.unique(gcd_sg, axis=0, return_inverse=True)  
     # gcd = reshape(GCD(gcdID), size(gcd))
     r   = GCD[:,1]
     GCD = GCD[:,0]
 
     # get list of frequencies to be calculated
-    f = list(range(0, fs/2, fs/Nsamples)) 
+    f = list(np.arange(0, fs/2 + fs/Nsamples, fs/Nsamples)) 
 
     # calculate complex the transfer function in the frequency domain
-    H = new_hrtf(a, r, r_0, GCD/180*np.pi, f, c, Nsh)
+    # H = new_hrtf(a, r, r_0, GCD/180*np.pi, f, c, Nsh)  <---- takes ages to calcalte
+
+    # Random Test Transfer Function
+    H = np.random.uniform(low=-0.0019, high=1, size=(482220,)) + np.random.uniform(low=-0.0019, high=1, size=(482220,)) * 1j
+    H = np.reshape(H, (513,940))
 
     # set 0 Hz bin to 1 (0 dB)
     H[0,:] = 1
@@ -642,11 +656,11 @@ def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -92, -2)), max_ang=
 
     # resort to match the desired sampling grid
     h = np.zeros((Nsamples, sg.shape[0], 2))
-    h[:,:,0] = hUnique[:, gcdID[1:sg.shape[0]+1]]
-    h[:,:,1] = hUnique[:, gcdID[sg.shape[0]+1:]]
+    h[:,:,0] = hUnique[:, gcdID[0:sg.shape[0]]]
+    h[:,:,1] = hUnique[:, gcdID[sg.shape[0]:]]
 
     return [h, offCenterParameter]
 
-AKsphericalHead()
+AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -100, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1), ear = [85, -13], offCenter = [-4e3, 1e3, 2e3], a = 0.0875, r_0 = 100*0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343)
 # %%
 
