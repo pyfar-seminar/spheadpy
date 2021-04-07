@@ -1,7 +1,10 @@
 # %% --------------import packages-------------------------------------
 
 from pyfar import Signal
+from pyfar.spatial.samplings import sph_great_circle
+from pyfar.coordinates import Coordinates
 import numpy as np
+import time
 # import numpy.matlib
 import cmath
 
@@ -15,6 +18,8 @@ r_0 = 100 * a  # distance of the source to the origin of co-coordinates
 theta = [0, 150/180*np.pi] # angle of incidence (rad) 
 c = 343    # ambient speed of sound (m/s)
 threshold = 100 # min 50 
+fs = 44100
+Nsamples = 100
 
 # %% ---------------OLD HRTF Duda 1998------------------------------------
 def hrtf(a, r, theta, f, c, threshold):
@@ -89,258 +94,318 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
     Right now, rho_0 = rho, see line 152
     '''
     
-    h_upp_dB = []
-
+    # h_upp_dB = []
+    H = np.zeros((len(f), len(theta)))
     # normalized distance - Eq. (5) in [1]
-    rho = [radius / a for radius in r]
-    # rho_0 = r_0 / a
+    # r_unique = np.unique(r)
+    r_unique, idx = np.unique(r, return_index=True)
+    print(r_unique, type(r_unique))
+    rho = [r / a for r in r_unique]
+    rho_0 = r_0 / a
     
     # normalized frequency - Eq. (4) in [1]
-    norm_freq = [(2 * np.pi * freq * a) / c for freq in f]
-    
-    for angle in theta:
+    mu = np.array([(2 * np.pi * freq * a) / c for freq in f])
+    for i, angle in enumerate(theta):
         x = np.cos(angle)
-        for r in rho:
-            for mu in norm_freq:
-                if mu == 0:
-                    zr = float('inf')
-                    za = float('inf')
-                else:
-                    zr = 1 / (1j * mu * r)
-                    za = 1 / (1j * mu)
+        # r_test = rho[idx[i]]
+        # for r in rho: # ein rho für einen angle 
+            # for mu in norm_freq:  # mu vektorisieren 
+            # if mu == 0:
+            #     zr = float('inf')
+            #     za = float('inf')
+            # else:
+        if len(rho) == 1: 
+            zr = 1 / (1j * mu * rho)
+            za = 1 / (1j * mu)
+        
+        else:
+            zr = 1 / (1j * mu * rho[idx[i]])
+            za = 1 / (1j * mu)
 
-                qr2 = zr
-                qr1 = zr * (1 - zr)
-                qa2 = za
-                qa1 = za * (1 - za)
+        qr2 = zr
+        qr1 = zr * (1 - zr)
+        qa2 = za
+        qa1 = za * (1 - za)
 
-                # initialize legendre Polynom for order m=0 (P2) and m=1 (P1)
-                p2 = 1
-                p1 = x
+        # initialize legendre Polynom for order m=0 (P2) and m=1 (P1)
+        p2 = 1
+        p1 = x
 
-                # initialize the sum - Eq. (A10) in [1]
-                summ = 0
+        # initialize the sum - Eq. (A10) in [1]
+        summ = 0
 
-                # calculate the sum for m=0
-                term = zr / (za * (za - 1))
-                summ = summ + term
+        # calculate the sum for m=0
+        term = zr / (za * (za - 1))
+        summ = summ + term
 
-                # calculate sum for m=1
-                if threshold > 0:
-                    term = (3 * x * zr * (zr - 1)) / (za * (2 * (za ** 2) - 2 * za + 1))
-                    summ = summ + term
+        # calculate sum for m=1
+        if threshold > 0:
+            term = (3 * x * zr * (zr - 1)) / (za * (2 * (za ** 2) - 2 * za + 1))
+            summ = summ + term
 
-                for m in range(2, threshold+1):
-                    # recursive calculation of the Legendre polynomial of order m (see doc legendreP)
-                    p = ((2 * m - 1) * x * p1 - (m - 1) * p2) / m
+        for m in range(2, threshold+1):
+            # recursive calculation of the Legendre polynomial of order m (see doc legendreP)
+            p = ((2 * m - 1) * x * p1 - (m - 1) * p2) / m
 
-                    # recursive calculation of the Hankel fraction
-                    qr = - (2 * m - 1) * zr * qr1 + qr2
-                    qa = - (2 * m - 1) * za * qa1 + qa2
-                    
-                    # update the sum and recursive terms
-                    term = ((2 * m + 1) * p * qr) / ((m + 1) * za * qa - qa1)  # might become NaN for low frequencies
-                
-                    summ = summ + term  
-                    
-                    qr2 = qr1
-                    qr1 = qr
-                    qa2 = qa1
-                    qa1 = qa
-                    p2 = p1
-                    p1 = p
+            # recursive calculation of the Hankel fraction
+            qr = - (2 * m - 1) * zr * qr1 + qr2
+            qa = - (2 * m - 1) * za * qa1 + qa2
+            
+            # update the sum and recursive terms
+            term = ((2 * m + 1) * p * qr) / ((m + 1) * za * qa - qa1)  # might become NaN for low frequencies
+        
+            summ = summ + term  
+            
+            qr2 = qr1
+            qr1 = qr
+            qa2 = qa1
+            qa1 = qa
+            p2 = p1
+            p1 = p
 
-                pressure = r * cmath.exp(1j * (mu * r - mu * r - mu)) * summ / (1j * mu)
-                dB = 20*np.log(np.abs(pressure)/(1))
-                h_upp_dB.append(dB)  
-    return h_upp_dB
+        # if mu == 0:
+        #     pressure = float('inf')
+        # else:
+        # summ = np.array(summ)
+        if len(rho) == 1: 
+            H[:,i] = rho_0 * np.exp(1j * (mu * rho - mu * rho_0 - mu)) * summ / (1j * mu)
+        else:
+            H[:,i] = rho_0 * np.exp(1j * (mu * rho[idx[i]] - mu * rho_0 - mu)) * summ / (1j * mu)
 
+        # dB = 20*np.log(np.abs(pressure)/(1))
+        # h_upp_dB.append(dB)  
+    return H
 
-# %% -------------------info prints----------------------------------
-f_low = round((0.1*c)/(2*np.pi*a), 2)
-print(f'f bei 0.1 mu: {f_low} Hz')
+f = list(np.arange(0, fs/2 + fs/Nsamples, fs/Nsamples)) 
+new_hrtf(a, r, r_0, theta, f, c, threshold)
 
-f_hi = round((100*c)/(2*np.pi*a), 2)  # isn't this too high?!
-print(f'f bei 100 mu: {f_hi} Hz')
+# %% AKsphericalHead
+def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False, r_0 = None, a = 0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
+    '''calculates head-realated impulse responses (HRIRs) of a spherical head
+        model with offset ears using the formulation from according to [1]. HRIRs
+        are calculated by dividing the pressure on the sphere by the free field
+        essure of a point source in the origin of coordinates.
+        See AKsphericalHeadDemo.m for example use cases
+        Additional information on the model itself can be found in
+        2_Tools/SphericalHarmonics/AKsphericalHead.pdf
+    Params:
+        sg        - [N x 3] matrix with the spatial sampling grid, where the
+                    first column specifies the azimuth (0 deg. = front,
+                    90 deg. = left), the second column the elevation
+                    (90 deg. = above, 0 deg. = front, -90 deg. = below), and the
+                    third column the radius [m]. If only two columns are given
+                    the radius is set to a*100 (see below)
+                    (default: AKgreatCircleGrid(90:-10:-90, 10, 90) )
+        ear       - four element vector that specifies position of left and right
+                    ear: [azimuth_l elevation_l azimuth_r elevation_r]. If only
+                    two values are passed, symmetrical ears are assumed.
+                    (defualt = [85 -13], average values from [2], Tab V,
+                    condition All, O-A) 
+        offCenter - false   : the spherical head is centered in the coordinate
+                            system (default)
+                    true    : the interaural axis (i.e., the connection between
+                            the two ears) is centered. This is done be
+                            averaging the ear azimuth and elevation, and
+                            and a translation the sampling grid
+                    [x y z] : x/y/z coordinates of the center of the sphere [m].
+                            E.g., [-4e3 1e3 2e3] moves the spherical head 4 mm
+                            to the back, 1 mm to the left (left ear away from
+                            the origin of coordinates) and 2 mm up.
+        a         - radius of the spherical head in m (default = 0.0875)
+        r_0       - distance of the free-field point source in m that used as
+                    reference (by default the radius from the sampling grid is
+                    taken: r_0 = sg(1,3) )
+        Nsh       - spherical harmonics order (default = 100)
+        Nsamples  - length in samples (default = 1024)
+        fs        - sampling rate in Hz (default = 44100)
+        c         - speed of sound [m/s] (default = 343)
 
-mu_20k = (2*np.pi*20000*a)/c
-print(f'mu bei 20 kHz: {mu_20k}')
+    Returns:
+        h                  - spherical head impulse responses given in matrix of
+                            size [Nsamples x N x 2]: Left ear = h(:,:,1),
+                            right ear = h(:,:,2)
+        offCenterParameter - spherical head model parameters after translation
+                            and changing the ear position (if applied)
 
-# create frequency / mu vector
-freq_vec = np.linspace(f_low, f_hi, 2000)
-mu_freq_vec = (2*np.pi*freq_vec*a)/c
-
-# calculate HRTF
-HRTF_freq_dB = hrtf(a, r, theta, freq_vec, c, threshold)
-off_ear_freq_dB = new_hrtf(a, r, r_0, theta, freq_vec, c, threshold)
-
-print(f'HRTF_freq_dB max: {round(max(HRTF_freq_dB),1)} dB, HRTF_freq_dB min: {round(min(HRTF_freq_dB),1)} dB')
-print(f'off_ear_freq_dB max: {round(max(off_ear_freq_dB),1)} dB, off_ear_freq_dB min: {round(min(off_ear_freq_dB),1)} dB')
-
-# %% -----------------------Plotting Duda 1998--------------------------
-len_plot = int(len(HRTF_freq_dB)/(len(r)*len(theta)))
-l_size = 3
-
-plt.figure(figsize=(20,10))
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[:len_plot], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e16$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot:len_plot*2], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*2:len_plot*3], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*3:len_plot*4], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*4:len_plot*5], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*5:len_plot*6], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e16$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
-plt.xlim([0.1,100])
-
-# vertical lines
-position1 = np.arange(0.1, 1.1, step=0.1)
-position2 = np.arange(1, 11, step=1)
-position3 = np.arange(10, 110, step=10)
-position = list(position1) + list(position2) + list(position3)
-for tick in position:
-    plt.vlines(tick, -65, 45, colors='k', linestyle=':', linewidth=1)
+                            ear    : new ear position (see above)
+                            sg     : new sampling grid (see above)
+                            r      : radius for each point of sg
+                            azRot  : rotation above z-axis (azimuth) that was
+                                    applied to get the new ear azimuth
+                            elRot  : rotation above x-axis (elevation) that was
+                                    applied to get the new ear elevation
+                            xTrans : translation of the spherical head in x-
+                                    direction, that was applied to center the
+                                    interaural axis
+                            zTrans : translation of the spherical head in z-
+                                    direction, that was applied to center the
+                                    interaural axis'''
     
-plt.vlines(mu_20k, -65, 45, colors='r', linestyle='-', linewidth=1.5, label='20 kHz')
-plt.grid(color='k', linestyle=':', linewidth=2)
+    offCenterParameter = {}
 
-# plt.ylim(-130, -35)
-plt.title('Effect of range on the magnitude response - Duda 1998', fontsize=20)
-plt.ylabel('Response (dB)', fontsize=15)
-plt.xlabel(r'Normierte Frequenz: $\mu = \frac{2\pi fa}{c}$', fontsize=15)
-plt.legend(prop={'size': 18})
-plt.show()
+    print(sg._points.shape)
+    print(sg.cshape)
+    if r_0 is None:
+        r_0 = sg.get_sph()[0,2]
 
-# %% -----------------------Plotting Off Ear--------------------------
-len_plot = int(len(off_ear_freq_dB)/(len(r)*len(theta)))
-l_size = 3
+    # check format of ear vector
+    if len(ear) == 2:
+        ear = ear + [360 - ear[0], ear[1]]
 
-plt.figure(figsize=(20,10))
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[:len_plot], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e16$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot:len_plot*2], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*2:len_plot*3], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*3:len_plot*4], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*4:len_plot*5], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*5:len_plot*6], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e16$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
-plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
-plt.xlim([0.1,100])
+    # rotate and translate the spherical head
+    # center the interaural axis
+    if isinstance(offCenter, list):
+        # sampling grid in carthesian coordinates
+        # sgX, sgY, sgZ = sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
+        cart_coor = sg.get_cart(convention='right', unit='met')
 
-# vertical lines
-position1 = np.arange(0.1, 1.1, step=0.1)
-position2 = np.arange(1, 11, step=1)
-position3 = np.arange(10, 110, step=10)
-position = list(position1) + list(position2) + list(position3)
-for tick in position:
-    plt.vlines(tick, -65, 45, colors='k', linestyle=':', linewidth=1)
+        cart_coor = cart_coor.reshape((-1,3))
+        # translate the sampling grid
+        # sgX = sgX - offCenter[0]  # sgX
+        # sgY = sgY - offCenter[1]  # sgY
+        # sgZ = sgZ - offCenter[2]  # sgZ
+        sg.set_cart(cart_coor[0] - offCenter[0], cart_coor[1] - offCenter[1], cart_coor[2] - offCenter[2])
+        # cart_coor[0] = cart_coor[0] - offCenter[0]  # sgX
+        # cart_coor[1] = cart_coor[1] - offCenter[1]  # sgY
+        # cart_coor[2] = cart_coor[2] - offCenter[2]  # sgZ
+        # print(cart_coor, cart_coor.shape)
+
+        # translated sampling grid in spherical coordinates
+        # sgAz, sgEl, sgR   = cart2sph(sgX, sgY, sgZ)
+        # sgAz, sgEl, sgR  = pyfar.coordinates.cart2sph
+        sph_coor          = sg.get_sph(convention='top_elev', unit='deg')
+        # sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
+        # sg                = [np.reshape(i, (len(i),1)) for i in sg]
+        # sg                = np.hstack((sg[0], sg[1], sg[2]))
+        sph_coor = np.round(sph_coor, 5)    
+        sph_coor[:,0] = [x%360 for x in sph_coor[:,0]]
+        
+        # save parameter
+        offCenterParameter['sg'] = sph_coor
+        
+    elif offCenter == True: 
+        # check if the ear azimuths are symmetrical
+        if ear[0] != 360-ear[2]:
+            earAz = np.mean([ear[0], 360-ear[2]])
+            offCenterParameter['azimuthRotation'] = earAz - ear[0]
+            for i, el in zip([0,2], [earAz, 360-earAz]):
+                ear[i] = el
+        else:
+            offCenterParameter['azimuthRotation'] = 0
+        
+        # check if the ear elevations are symmetrical
+        if ear[1] != ear[3]:
+            earEl = np.mean([ear[1], ear[3]])
+            offCenterParameter['elevation']         = earEl
+            offCenterParameter['elevationRotation'] = earEl - ear[1]
+            for i in [1,3]:
+                ear[i] = earEl
+        else:
+            offCenterParameter['elevationRotation'] = 0
+        
+        #sampling grid in carthesian coordinates
+        # sgX, sgY, sgZ = sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
+        cart_coor = sg.get_cart(convention='right', unit='met')
+        # cart_coor = Coordinates.get_cart(sg, convention='right', unit='met')
+        doTranslate   = False
+        
+        # check for translation in x-direction (front/back)
+        if ear[0] != 90:
+            offCenterParameter['xTranslation'] = np.sin(ear[0] - 90) * a
+            doTranslate = True
+            # sgX         = sgX - offCenterParameter['xTranslation']
+            sg.set_cart(cart_coor[0] - offCenterParameter['xTranslation'], cart_coor[1], cart_coor[2])
+
+        else:
+            offCenterParameter['xTranslation'] = 0
+        
+        # check for translation in z-direction (up/down)
+        if ear[1] != 0:
+            offCenterParameter['zTranslation'] = np.sin(-ear[1]) * a
+            doTranslate = True
+            # sgZ         = sgZ - offCenterParameter['zTranslation']
+            sg.set_cart(cart_coor[0], cart_coor[1], cart_coor[2] - offCenterParameter['zTranslation'])
+        else:
+            offCenterParameter['zTranslation'] = 0
+        
+        # transform grid to spherical coordinates again
+        if doTranslate:
+            # sgAz, sgEl, sgR   = cart2sph(sgX, sgY, sgZ)
+            sph_coor = sg.get_sph(convention='top_elev', unit='deg')
+            # sgAz, sgEl, sgR   = Coordinates.get_sph(sgX, sgY, sgZ, convention='top_elev', unit='rad')
+            # sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
+            # sg                = [np.reshape(i, (len(i),1)) for i in sg]
+            # sg                = np.hstack((sg[0], sg[1], sg[2]))
+
+            sph_coor = np.round(sph_coor, 5)    
+            sph_coor[:,0] = [x%360 for x in sph_coor[:,0]]
+
+        offCenterParameter['sg']  = sg
+        offCenterParameter['ear'] = ear
+        
+    elif offCenter == False:
+        offCenterParameter = False 
+        sph_coor = sg.get_sph(convention='top_elev', unit='deg')
+
+    # check parameter values
+    if any(sg.get_sph()[:,2] < a) or r_0 < a:
+        print('AKsphericalHead:Input', 'sg(:,3), and r_0 must be larger than a')
+
+    # spherical head model
+    # sph_coor
+    # calculate great circle distances between the sampling grid and the ears
+    arr1 = np.arccos(np.sin(sph_coor[:, 1]) * np.sin(ear[1]) + np.cos(sph_coor[:, 1]) * np.cos(ear[1]) * np.cos(sph_coor[:, 0] - ear[0]))
+    arr1 = np.reshape(arr1, (len(arr1),1))
+
+    arr2 = np.arccos(np.sin(sph_coor[:, 1]) * np.sin(ear[3]) + np.cos(sph_coor[:, 1]) * np.cos(ear[3]) * np.cos(sph_coor[:, 0] - ear[2]))
+    arr2 = np.reshape(arr2, (len(arr2),1))
+
+    gcd = np.vstack((arr1, arr2))
+   
+    rep = 2
+    radii = np.reshape(np.repeat(sph_coor[:, 2], rep), (rep*len(sph_coor[:, 2]),1)) 
+   
+    # get unique list of great circle distances and radii
+    gcd_sg = np.hstack((gcd, radii))
+    GCD, gcdID = np.unique(gcd_sg, axis=0, return_inverse=True)  
+
+    # gcd = reshape(GCD(gcdID), size(gcd))
+    r   = GCD[:,1]
+    GCD = GCD[:,0]
+    # get list of frequencies to be calculated
+    f = list(np.arange(0, fs/2 + fs/Nsamples, fs/Nsamples)) 
+
+    # calculate complex the transfer function in the frequency domain
+    H = new_hrtf(a, r, r_0, GCD/180*np.pi, f, c, Nsh)  
+
+    # set 0 Hz bin to 1 (0 dB)
+    H[0,:] = 1
+
+    # make sure bin at fs/2 is real
+    if f[-1] == fs/2:
+        H[-1,:] = abs(H[-1,:])
+
+    H = AKsingle2bothSidedSpectrum(H, 1 - Nsamples%2)
+    shtf = Signal(H, fs, Nsamples) 
+    print(shtf)
+    # add delay to shift the pulses away from the very start
+    shtf.time = np.roll(shtf.time, round(1.5e-3*fs), axis=0)
+    print(shtf)
     
-plt.vlines(mu_20k, -65, 45, colors='r', linestyle='-', linewidth=1.5, label='20 kHz')
-plt.grid(color='k', linestyle=':', linewidth=2)
+    print(f'shtf.cshape {shtf.cshape}')
+    print(f'shtf.n_samples {shtf.n_samples}')
+    print(f'shtf.times.shape {shtf.times.shape}')
+  
+    # resort to match the desired sampling grid
+    # h = np.zeros((Nsamples, sg._points.shape[0], 2))
+    # h = np.zeros(sg.cshape + (shtf.n_samples, 2))
+    h = np.zeros((Nsamples, sg.cshape[0], 2))
+    h[:,:,0] = shtf.time[:, gcdID[0:sg.cshape[0] ]]
+    h[:,:,1] = shtf.time[:, gcdID[sg.cshape[0] :]]
 
-# plt.ylim(-130, 200)
-plt.title('Effect of range on the magnitude response - Off Ear', fontsize=20)
-plt.ylabel('Response (dB)', fontsize=15)
-plt.xlabel(r'Normierte Frequenz: $\mu = \frac{2\pi fa}{c}$', fontsize=15)
-plt.legend(prop={'size': 18})
-plt.show()
-
-
-# %% quadarea
-def quadarea(lat1, lon1, lat2, lon2):
-    # h = np.sin(lat2)-np.sin(lat1)
-    # Az = 2 * np.pi * h
-    # Aq = Az * (lon2-lon1)/(2*np.pi)
-
-    A = (np.sin(np.deg2rad(lat2))-np.sin(np.deg2rad(lat1))) * np.deg2rad(lon2-lon1) / (4*np.pi)
-    return A
-
-quadarea(-90,-180,-89,180)
-
-# %% cart2sph
-def cart2sph(x, y, z):
-    hxy = np.hypot(x, y)
-    r = np.hypot(hxy, z)
-    el = np.arctan2(z, hxy)
-    az = np.arctan2(y, x)
-    return az, el, r
-
-# %% sph2cart
-def sph2cart(az, el, r):
-    rcos_theta = r * np.cos(el)
-    x = rcos_theta * np.cos(az)
-    y = rcos_theta * np.sin(az)
-    z = r * np.sin(el)
-    return x, y, z
-
-# %% AKsingle2bothSidedSpectrum
-# both_sided = AKsingle2bothSidedSpectrum(single_sided, is_even)
-#
-# can be used to switch back and forth between single and both sided
-# spectra, e.g.
-# y = AKboth2singleSidedSpectrum(x);
-# x = AKsingle2bothSidedSpectrum(y);
-#
-# Note that only the real part of the frequency bins at 0 Hz and Nyquist
-# #i.e. half the sampling rate) are considered before generating the both
-# sided spectrum.
-#
-# I N P U T
-# single-sided   - single sided spectrum , of size [N M C], where N is the
-#                  number of frequency bins, M the number of measurements
-#                  and C the number of channels.
-#                  N must correspond to frequencies of 
-#                  0 <= f <= fs/2, where f is the sampling frequency
-# is_even        - true if both sided spectrum had even number of
-#                  taps (default).
-#                  if is_even>1, it denotes the number of samples of the
-#                  both sided spectrum (default = 1)
-#
-# O  U T P U T
-# both-sided spectrum.
-#
-# F. Brinkmann, Audio Communication Group, TU Berlin, 04/2013
-
-# AKtools
-# Copyright (C) 2016 Audio Communication Group, Technical University Berlin
-# Licensed under the EUPL, Version 1.1 or as soon they will be approved by
-# the European Commission - subsequent versions of the EUPL (the "License")
-# You may not use this work except in compliance with the License.
-# You may obtain a copy of the License at: 
-# http://joinup.ec.europa.eu/software/page/eupl
-# Unless required by applicable law or agreed to in writing, software 
-# distributed under the License is distributed on an "AS IS" basis, 
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing  permissions and
-# limitations under the License. 
-
-def AKsingle2bothSidedSpectrum(single_sided, is_even=1):
-    if is_even>1:
-        is_even = 1 - is_even % 2 
-
-    N = single_sided.shape[0] 
-
-    if is_even:
-        # make sure that the bin at nyquist frequency is real
-        # (there might be rounding errors that produce small immaginary parts)
-        single_sided[-1,:] = [float(i) for i in single_sided[-1,:]]
-        # mirror the spectrum
-        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N-1,:])))) 
-    else:
-        # mirror the spectrum
-        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N+1,:]))))
-
-    # make sure that the bin at 0 Hz is real
-    # (there might be rounding errors that produce small immaginary parts)
-    both_sided[0,:] = [float(i) for i in both_sided[0,:]]
-
-    return both_sided
+    return shtf, offCenterParameter
+    
+AKsphericalHead()
 
 # %% AKgreatCircleGrid
 def AKgreatCircleGrid(el=list(range(90, -92, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1):
@@ -439,228 +504,189 @@ def AKgreatCircleGrid(el=list(range(90, -92, -10)), max_ang=10, fit=90, do_plot=
 
 AKgreatCircleGrid()
 
-# %% AKsphericalHead
-def AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -100, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1), ear = [85, -13], offCenter = False, a = 0.0875, r_0 = 100*0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
-    '''calculates head-realated impulse responses (HRIRs) of a spherical head
-        model with offset ears using the formulation from according to [1]. HRIRs
-        are calculated by dividing the pressure on the sphere by the free field
-        essure of a point source in the origin of coordinates.
-        See AKsphericalHeadDemo.m for example use cases
-        Additional information on the model itself can be found in
-        2_Tools/SphericalHarmonics/AKsphericalHead.pdf
-    Params:
-        sg        - [N x 3] matrix with the spatial sampling grid, where the
-                    first column specifies the azimuth (0 deg. = front,
-                    90 deg. = left), the second column the elevation
-                    (90 deg. = above, 0 deg. = front, -90 deg. = below), and the
-                    third column the radius [m]. If only two columns are given
-                    the radius is set to a*100 (see below)
-                    (default: AKgreatCircleGrid(90:-10:-90, 10, 90) )
-        ear       - four element vector that specifies position of left and right
-                    ear: [azimuth_l elevation_l azimuth_r elevation_r]. If only
-                    two values are passed, symmetrical ears are assumed.
-                    (defualt = [85 -13], average values from [2], Tab V,
-                    condition All, O-A) 
-        offCenter - false   : the spherical head is centered in the coordinate
-                            system (default)
-                    true    : the interaural axis (i.e., the connection between
-                            the two ears) is centered. This is done be
-                            averaging the ear azimuth and elevation, and
-                            and a translation the sampling grid
-                    [x y z] : x/y/z coordinates of the center of the sphere [m].
-                            E.g., [-4e3 1e3 2e3] moves the spherical head 4 mm
-                            to the back, 1 mm to the left (left ear away from
-                            the origin of coordinates) and 2 mm up.
-        a         - radius of the spherical head in m (default = 0.0875)
-        r_0       - distance of the free-field point source in m that used as
-                    reference (by default the radius from the sampling grid is
-                    taken: r_0 = sg(1,3) )
-        Nsh       - spherical harmonics order (default = 100)
-        Nsamples  - length in samples (default = 1024)
-        fs        - sampling rate in Hz (default = 44100)
-        c         - speed of sound [m/s] (default = 343)
+# %% quadarea
+def quadarea(lat1, lon1, lat2, lon2):
+    # h = np.sin(lat2)-np.sin(lat1)
+    # Az = 2 * np.pi * h
+    # Aq = Az * (lon2-lon1)/(2*np.pi)
 
-    Returns:
-        h                  - spherical head impulse responses given in matrix of
-                            size [Nsamples x N x 2]: Left ear = h(:,:,1),
-                            right ear = h(:,:,2)
-        offCenterParameter - spherical head model parameters after translation
-                            and changing the ear position (if applied)
+    A = (np.sin(np.deg2rad(lat2))-np.sin(np.deg2rad(lat1))) * np.deg2rad(lon2-lon1) / (4*np.pi)
+    return A
 
-                            ear    : new ear position (see above)
-                            sg     : new sampling grid (see above)
-                            r      : radius for each point of sg
-                            azRot  : rotation above z-axis (azimuth) that was
-                                    applied to get the new ear azimuth
-                            elRot  : rotation above x-axis (elevation) that was
-                                    applied to get the new ear elevation
-                            xTrans : translation of the spherical head in x-
-                                    direction, that was applied to center the
-                                    interaural axis
-                            zTrans : translation of the spherical head in z-
-                                    direction, that was applied to center the
-                                    interaural axis'''
-    
-    offCenterParameter = {}
+quadarea(-90,-180,-89,180)
 
-    # get hrtf_grid_deg from AKgreatCircleGrid output --> [hrtf_grid_deg, act_ang_GCD, act_ang, weights]
-    sg = sg[0]
-  
-    #  --- set default parameters ---
-    if sg.shape[1] < 3:
-        r_0 = 100*a
+# %% cart2sph
+def cart2sph(x, y, z):
+    hxy = np.hypot(x, y)
+    r = np.hypot(hxy, z)
+    el = np.arctan2(z, hxy)
+    az = np.arctan2(y, x)
+    return az, el, r
+
+# %% sph2cart
+def sph2cart(az, el, r):
+    rcos_theta = r * np.cos(el)
+    x = rcos_theta * np.cos(az)
+    y = rcos_theta * np.sin(az)
+    z = r * np.sin(el)
+    return x, y, z
+
+# %% AKsingle2bothSidedSpectrum
+# both_sided = AKsingle2bothSidedSpectrum(single_sided, is_even)
+#
+# can be used to switch back and forth between single and both sided
+# spectra, e.g.
+# y = AKboth2singleSidedSpectrum(x);
+# x = AKsingle2bothSidedSpectrum(y);
+#
+# Note that only the real part of the frequency bins at 0 Hz and Nyquist
+# #i.e. half the sampling rate) are considered before generating the both
+# sided spectrum.
+#
+# I N P U T
+# single-sided   - single sided spectrum , of size [N M C], where N is the
+#                  number of frequency bins, M the number of measurements
+#                  and C the number of channels.
+#                  N must correspond to frequencies of 
+#                  0 <= f <= fs/2, where f is the sampling frequency
+# is_even        - true if both sided spectrum had even number of
+#                  taps (default).
+#                  if is_even>1, it denotes the number of samples of the
+#                  both sided spectrum (default = 1)
+#
+# O  U T P U T
+# both-sided spectrum.
+#
+# F. Brinkmann, Audio Communication Group, TU Berlin, 04/2013
+
+# AKtools
+# Copyright (C) 2016 Audio Communication Group, Technical University Berlin
+# Licensed under the EUPL, Version 1.1 or as soon they will be approved by
+# the European Commission - subsequent versions of the EUPL (the "License")
+# You may not use this work except in compliance with the License.
+# You may obtain a copy of the License at: 
+# http://joinup.ec.europa.eu/software/page/eupl
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" basis, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing  permissions and
+# limitations under the License. 
+
+def AKsingle2bothSidedSpectrum(single_sided, is_even=1):
+    if is_even>1:
+        is_even = 1 - is_even % 2 
+
+    N = single_sided.shape[0] 
+
+    if is_even:
+        # make sure that the bin at nyquist frequency is real
+        # (there might be rounding errors that produce small immaginary parts)
+        single_sided[-1,:] = [float(i) for i in single_sided[-1,:]]
+        # mirror the spectrum
+        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N-1,:])))) 
     else:
-        r_0 = sg[0,2]
+        # mirror the spectrum
+        both_sided = np.vstack((single_sided, np.flipud(np.conj(single_sided[1:N+1,:]))))
 
-    # check format of the sampling grid
-    if sg.shape[1] < 3:
-        sg = np.hstack((sg, r_0 * np.ones((sg.shape[0], 1))))  
+    # make sure that the bin at 0 Hz is real
+    # (there might be rounding errors that produce small immaginary parts)
+    both_sided[0,:] = [float(i) for i in both_sided[0,:]]
 
-    # check format of ear vector
-    if len(ear) == 2:
-        ear = ear + [360 - ear[0], ear[1]]
+    return both_sided
 
-    # rotate and translate the spherical head
-    # center the interaural axis
-    if isinstance(offCenter, list):
-        # sampling grid in carthesian coordinates
-        sgX, sgY, sgZ = sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
-        
-        # translate the samplingv grid
-        sgX = sgX - offCenter[0]
-        sgY = sgY - offCenter[1]
-        sgZ = sgZ - offCenter[2]
-        
-        # translated sampling grid in spherical coordinates
-        sgAz, sgEl, sgR   = cart2sph(sgX, sgY, sgZ)
-        sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
-        sg                = [np.reshape(i, (len(i),1)) for i in sg]
-        sg                = np.hstack((sg[0], sg[1], sg[2]))
-        for i in range(sg.shape[1]):     
-            sg[:,i] = [round(x*10000)/10000 for x in sg[:,i]] 
-        sg[:,0] = [x%360 for x in sg[:,0]]
-        
-        # save parameter
-        offCenterParameter['sg'] = sg
-        
-        del [sgX, sgY, sgZ, sgAz, sgEl, sgR]
 
-    elif offCenter == True: 
-        # check if the ear azimuths are symmetrical
-        if ear[0] != 360-ear[2]:
-            earAz = np.mean([ear[0], 360-ear[2]])
-            offCenterParameter['azimuthRotation'] = earAz - ear[0]
-            for i, el in zip([0,2], [earAz, 360-earAz]):
-                ear[i] = el
-            del earAz
-        else:
-            offCenterParameter['azimuthRotation'] = 0
+# %% -------------------info prints----------------------------------
+f_low = round((0.1*c)/(2*np.pi*a), 2)
+print(f'f bei 0.1 mu: {f_low} Hz')
 
-        
-        # check if the ear elevations are symmetrical
-        if ear[1] != ear[3]:
-            earEl = np.mean([ear[1], ear[3]])
-            offCenterParameter['elevation']         = earEl
-            offCenterParameter['elevationRotation'] = earEl - ear[1]
-            for i in [1,3]:
-                ear[i] = earEl
-            del earEl
-        else:
-            offCenterParameter['elevationRotation'] = 0
-        
-        #sampling grid in carthesian coordinates
-        sgX, sgY, sgZ = sph2cart(sg[:,0]/180*np.pi, sg[:,1]/180*np.pi, sg[:,2])
-        doTranslate   = False
-        
-        # check for translation in x-direction (front/back)
-        if ear[0] != 90:
-            offCenterParameter['xTranslation'] = np.sin(ear[0] - 90) * a
-            doTranslate = True
-            sgX         = sgX - offCenterParameter['xTranslation']
-        else:
-            offCenterParameter['xTranslation'] = 0
-        
-        # check for translation in z-direction (up/down)
-        if ear[1] != 0:
-            offCenterParameter['zTranslation'] = np.sin(-ear[1]) * a
-            doTranslate = True
-            sgZ         = sgZ - offCenterParameter['zTranslation']
-        else:
-            offCenterParameter['zTranslation'] = 0
-        
-        # transform grid to spherical coordinates again
-        if doTranslate:
-            sgAz, sgEl, sgR   = cart2sph(sgX, sgY, sgZ)
-            sg                = [sgAz/np.pi*180, sgEl/np.pi*180, sgR]
-            sg                = [np.reshape(i, (len(i),1)) for i in sg]
-            sg                = np.hstack((sg[0], sg[1], sg[2]))
-            for i in range(sg.shape[1]):     
-                sg[:,i] = [round(x*10000)/10000 for x in sg[:,i]] 
-            sg[:,0] = [x%360 for x in sg[:,0]]
+f_hi = round((100*c)/(2*np.pi*a), 2)  # isn't this too high?!
+print(f'f bei 100 mu: {f_hi} Hz')
 
-        offCenterParameter['sg']  = sg
-        offCenterParameter['ear'] = ear
-        
-    elif offCenter == False:
-        offCenterParameter = False 
+mu_20k = (2*np.pi*20000*a)/c
+print(f'mu bei 20 kHz: {mu_20k}')
 
-    # check parameter values
-    if any(sg[:,2] < a) or r_0 < a:
-        print('AKsphericalHead:Input', 'sg(:,3), and r_0 must be larger than a')
+# create frequency / mu vector
+freq_vec = np.linspace(f_low, f_hi, 2000)
+mu_freq_vec = (2*np.pi*freq_vec*a)/c
 
-    # spherical head model
-    # calculate great circle distances between the sampling grid and the ears
-    arr1 = np.arccos(np.sin(sg[:, 1]) * np.sin(ear[1]) + np.cos(sg[:, 1]) * np.cos(ear[1]) * np.cos(sg[:, 0] - ear[0]))
-    arr1 = np.reshape(arr1, (len(arr1),1))
+# calculate HRTF
+HRTF_freq_dB = hrtf(a, r, theta, freq_vec, c, threshold)
+off_ear_freq_dB = new_hrtf(a, r, r_0, theta, freq_vec, c, threshold)
 
-    arr2 = np.arccos(np.sin(sg[:, 1]) * np.sin(ear[3]) + np.cos(sg[:, 1]) * np.cos(ear[3]) * np.cos(sg[:, 0] - ear[2]))
-    arr2 = np.reshape(arr2, (len(arr2),1))
+print(f'HRTF_freq_dB max: {round(max(HRTF_freq_dB),1)} dB, HRTF_freq_dB min: {round(min(HRTF_freq_dB),1)} dB')
+print(f'off_ear_freq_dB max: {round(max(off_ear_freq_dB),1)} dB, off_ear_freq_dB min: {round(min(off_ear_freq_dB),1)} dB')
 
-    gcd = np.vstack((arr1, arr2))
-   
-    rep = 2
-    radii = np.reshape(np.repeat(sg[:, 2], rep), (rep*len(sg[:, 2]),1)) 
-   
-    # get unique list of great circle distances and radii
-    gcd_sg = np.hstack((gcd, radii))
-    GCD, gcdID = np.unique(gcd_sg, axis=0, return_inverse=True)  
-    # gcd = reshape(GCD(gcdID), size(gcd))
-    r   = GCD[:,1]
-    GCD = GCD[:,0]
+# %% -----------------------Plotting Duda 1998--------------------------
+len_plot = int(len(HRTF_freq_dB)/(len(r)*len(theta)))
+l_size = 3
 
-    # get list of frequencies to be calculated
-    f = list(np.arange(0, fs/2 + fs/Nsamples, fs/Nsamples)) 
+plt.figure(figsize=(20,10))
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[:len_plot], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot:len_plot*2], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*2:len_plot*3], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*3:len_plot*4], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*4:len_plot*5], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*5:len_plot*6], '-', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, HRTF_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
+plt.xlim([0.1,100])
 
-    # calculate complex the transfer function in the frequency domain
-    # H = new_hrtf(a, r, r_0, GCD/180*np.pi, f, c, Nsh)  <---- takes ages to calcalte
+# vertical lines
+position1 = np.arange(0.1, 1.1, step=0.1)
+position2 = np.arange(1, 11, step=1)
+position3 = np.arange(10, 110, step=10)
+position = list(position1) + list(position2) + list(position3)
+for tick in position:
+    plt.vlines(tick, -65, 45, colors='k', linestyle=':', linewidth=1)
+    
+plt.vlines(mu_20k, -65, 45, colors='r', linestyle='-', linewidth=1.5, label='20 kHz')
+plt.grid(color='k', linestyle=':', linewidth=2)
 
-    # Random Test Transfer Function
-    H = np.random.uniform(low=-0.0019, high=1, size=(482220,)) + np.random.uniform(low=-0.0019, high=1, size=(482220,)) * 1j
-    H = np.reshape(H, (513,940))
+# plt.ylim(-130, -35)
+plt.title('Effect of range on the magnitude response - Duda 1998', fontsize=20)
+plt.ylabel('Response (dB)', fontsize=15)
+plt.xlabel(r'Normierte Frequenz: $\mu = \frac{2\pi fa}{c}$', fontsize=15)
+plt.legend(prop={'size': 18})
+plt.show()
 
-    # set 0 Hz bin to 1 (0 dB)
-    H[0,:] = 1
+# %% -----------------------Plotting Off Ear--------------------------
+len_plot = int(len(off_ear_freq_dB)/(len(r)*len(theta)))
+l_size = 3
 
-    # make sure bin at fs/2 is real
-    if f[-1] == fs/2:
-        H[-1,:] = abs(H[-1,:])
+plt.figure(figsize=(20,10))
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[:len_plot], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot:len_plot*2], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 8$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*2:len_plot*3], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 4$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*3:len_plot*4], '--', linewidth=l_size, label=r'$ \theta = 0°, \rho = 2$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*4:len_plot*5], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*5:len_plot*6], '-.', linewidth=l_size, label=r'$ \theta = 0°, \rho = 1.25$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*6:len_plot*7], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1e16$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*7:len_plot*8], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 8$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*8:len_plot*9], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 4$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*9:len_plot*10], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 2$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*10:len_plot*11], '--', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.5$')
+plt.semilogx(mu_freq_vec, off_ear_freq_dB[len_plot*11:len_plot*12], '-.', linewidth=l_size, label=r'$ \theta = 150°, \rho = 1.25$')
+plt.xlim([0.1,100])
 
-    # mirror the spectrum
-    H = AKsingle2bothSidedSpectrum(H, 1 - Nsamples%2)
+# vertical lines
+position1 = np.arange(0.1, 1.1, step=0.1)
+position2 = np.arange(1, 11, step=1)
+position3 = np.arange(10, 110, step=10)
+position = list(position1) + list(position2) + list(position3)
+for tick in position:
+    plt.vlines(tick, -65, 45, colors='k', linestyle=':', linewidth=1)
+    
+plt.vlines(mu_20k, -65, 45, colors='r', linestyle='-', linewidth=1.5, label='20 kHz')
+plt.grid(color='k', linestyle=':', linewidth=2)
 
-    # get the impuse responses
-    hUnique = np.fft.ifft(H)
-
-    # add delay to shift the pulses away from the very start
-    hUnique = np.roll(hUnique, round(1.5e-3*fs), axis=0)
-
-    # resort to match the desired sampling grid
-    h = np.zeros((Nsamples, sg.shape[0], 2))
-    h[:,:,0] = hUnique[:, gcdID[0:sg.shape[0]]]
-    h[:,:,1] = hUnique[:, gcdID[sg.shape[0]:]]
-
-    return [h, offCenterParameter]
-
-AKsphericalHead(sg = AKgreatCircleGrid(el=list(range(90, -100, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1), ear = [85, -13], offCenter = [-4e3, 1e3, 2e3], a = 0.0875, r_0 = 100*0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343)
-# %%
+# plt.ylim(-130, 200)
+plt.title('Effect of range on the magnitude response - Off Ear', fontsize=20)
+plt.ylabel('Response (dB)', fontsize=15)
+plt.xlabel(r'Normierte Frequenz: $\mu = \frac{2\pi fa}{c}$', fontsize=15)
+plt.legend(prop={'size': 18})
+plt.show()
 
