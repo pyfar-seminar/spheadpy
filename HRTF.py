@@ -1,5 +1,5 @@
 # %% --------------import packages-------------------------------------
-
+import pyfar
 from pyfar import Signal
 from pyfar.spatial.samplings import sph_great_circle
 from pyfar.coordinates import Coordinates
@@ -90,21 +90,18 @@ def hrtf(a, r, theta, f, c, threshold):
 
 # %% ---------------Off Ear HRTF ------------------------------------
 def new_hrtf(a, r, r_0, theta, f, c, threshold):    
-    '''
-    Right now, rho_0 = rho, see line 152
-    '''
     
-    # h_upp_dB = []
+    # create matrix for HRTF
     H = np.zeros((len(f), len(theta)))
+
     # normalized distance - Eq. (5) in [1]
-    # r_unique = np.unique(r)
     r_unique, idx = np.unique(r, return_index=True)
-    print(r_unique, type(r_unique))
     rho = [r / a for r in r_unique]
     rho_0 = r_0 / a
     
     # normalized frequency - Eq. (4) in [1]
     mu = np.array([(2 * np.pi * freq * a) / c for freq in f])
+    
     for i, angle in enumerate(theta):
         x = np.cos(angle)
         # r_test = rho[idx[i]]
@@ -171,9 +168,7 @@ def new_hrtf(a, r, r_0, theta, f, c, threshold):
             H[:,i] = rho_0 * np.exp(1j * (mu * rho - mu * rho_0 - mu)) * summ / (1j * mu)
         else:
             H[:,i] = rho_0 * np.exp(1j * (mu * rho[idx[i]] - mu * rho_0 - mu)) * summ / (1j * mu)
-
-        # dB = 20*np.log(np.abs(pressure)/(1))
-        # h_upp_dB.append(dB)  
+ 
     return H
 
 f = list(np.arange(0, fs/2 + fs/Nsamples, fs/Nsamples)) 
@@ -199,7 +194,7 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
         ear       - four element vector that specifies position of left and right
                     ear: [azimuth_l elevation_l azimuth_r elevation_r]. If only
                     two values are passed, symmetrical ears are assumed.
-                    (defualt = [85 -13], average values from [2], Tab V,
+                    (defualt = [85, -13], average values from [2], Tab V,
                     condition All, O-A) 
         offCenter - false   : the spherical head is centered in the coordinate
                             system (default)
@@ -208,7 +203,7 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
                             averaging the ear azimuth and elevation, and
                             and a translation the sampling grid
                     [x y z] : x/y/z coordinates of the center of the sphere [m].
-                            E.g., [-4e3 1e3 2e3] moves the spherical head 4 mm
+                            E.g., [-4e3, 1e3, 2e3] moves the spherical head 4 mm
                             to the back, 1 mm to the left (left ear away from
                             the origin of coordinates) and 2 mm up.
         a         - radius of the spherical head in m (default = 0.0875)
@@ -240,17 +235,33 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
                             zTrans : translation of the spherical head in z-
                                     direction, that was applied to center the
                                     interaural axis'''
-    
-    offCenterParameter = {}
 
-    print(sg._points.shape)
-    print(sg.cshape)
+    # check format of spherical grid
+    if not isinstance(sg, Coordinates):
+        raise ValueError("The spherical grid needs to be a pyfar.coordinates object.")
+    
+    # check format of ear vector
+    if len(ear) < 2 or len(ear) == 3 or len(ear) > 4:
+        raise ValueError("Ear needs to have either 2 entries if symmetrical ears are assumed, or four elements [azimuth_l elevation_l azimuth_r elevation_r].")
+    elif len(ear) == 2:
+        ear = ear + [360 - ear[0], ear[1]]
+
+    # check format of spherical grid
+    if offCenter is not True and offCenter is not False and len(offCenter) != 3:
+        raise ValueError("offCenter must be either True, False, or given as x/y/z coordinates off the center of the sphere [m].")
+
+    # check reference radius 
     if r_0 is None:
         r_0 = sg.get_sph()[0,2]
+    
+    if any(sg.get_sph()[:,2] < a) or r_0 < a:
+        raise ValueError("Source is inside the head. sg(:,3), and r_0 must be larger than a.")
 
-    # check format of ear vector
-    if len(ear) == 2:
-        ear = ear + [360 - ear[0], ear[1]]
+    # dict for offCenter parameter
+    offCenterParameter = {}
+
+    test = sg._points
+    print(test)
 
     # rotate and translate the spherical head
     # center the interaural axis
@@ -347,12 +358,7 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
         offCenterParameter = False 
         sph_coor = sg.get_sph(convention='top_elev', unit='deg')
 
-    # check parameter values
-    if any(sg.get_sph()[:,2] < a) or r_0 < a:
-        print('AKsphericalHead:Input', 'sg(:,3), and r_0 must be larger than a')
-
     # spherical head model
-    # sph_coor
     # calculate great circle distances between the sampling grid and the ears
     arr1 = np.arccos(np.sin(sph_coor[:, 1]) * np.sin(ear[1]) + np.cos(sph_coor[:, 1]) * np.cos(ear[1]) * np.cos(sph_coor[:, 0] - ear[0]))
     arr1 = np.reshape(arr1, (len(arr1),1))
@@ -372,6 +378,7 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
     # gcd = reshape(GCD(gcdID), size(gcd))
     r   = GCD[:,1]
     GCD = GCD[:,0]
+
     # get list of frequencies to be calculated
     f = list(np.arange(0, fs/2 + fs/Nsamples, fs/Nsamples)) 
 
@@ -403,142 +410,13 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
     h[:,:,0] = shtf.time[:, gcdID[0:sg.cshape[0] ]]
     h[:,:,1] = shtf.time[:, gcdID[sg.cshape[0] :]]
 
+    shtf = Signal(h, fs, Nsamples) 
+    
     return shtf, offCenterParameter
     
 AKsphericalHead()
 
-# %% AKgreatCircleGrid
-def AKgreatCircleGrid(el=list(range(90, -92, -10)), max_ang=10, fit=90, do_plot=0, res_ang=1):
-
-    # check input format
-    # el = reshape(el, [numel(el) 1]);
-
-    if fit == 0:
-        fit = 360
-
-    if 1 % res_ang:
-        print('AKgreatCircleGrid:Input', 'results can contain errors if 1/res_ang is NOT an integer numer')
-
-    # calculate delta phi to meet the criterion
-    # (according to Bovbjerg et al. 2000: Measuring the head related transfer
-    # functions of an artificial head with a high directional resolution,
-    # R.W. Sinnott, "Virtues of the Haversine", Sky and Telescope, vol. 68, no.
-    # 2, 1984, p. 159)
-
-    d_phi = [np.rad2deg(2*np.arcsin(np.sin(np.deg2rad(max_ang/2))/np.cos(np.deg2rad(i)))) for i in el]
-
-    # correct values at the poles
-    abs_el = np.array([abs(i) for i in el])
-    d_phi = [360 if element == 90 else d_phi[i] for i, element in enumerate(abs_el)]
-
-    # round to desired angular resolution
-    d_phi = [int(i / res_ang) * res_ang for i in d_phi]   # floor / int
-
-    # adjust delta phi to assure equal spacing on sphere -> mod(360, d_phi)!=0
-    # or quarter sphere -> mod(90, d_phi)!=0
-    # (if equally spaced on on quarter sphere (fit = 90), median, horizontal
-    # and frontal plane are included in measurements).
-    # this operation is easier in degrees than in radians...
-    for n in range(len(d_phi)):
-        if abs(el[n]) != 90:
-            while fit % d_phi[n]:
-                d_phi[n] = round((d_phi[n] - res_ang) / res_ang) * res_ang
-        else:
-            # irregularity at north and south pole
-            d_phi[n] = 360
-    
-    act_ang = d_phi
-
-    # calculate great circle angle that is actually used in the grid
-    # (R.W. Sinnott, "Virtues of the Haversine", Sky and Telescope, vol. 68, no. 2, 1984, p. 159)
-    act_ang_GCD = [np.rad2deg(2*np.arcsin(np.sqrt(np.cos(np.deg2rad(e))**2*np.sin(np.deg2rad(phi/2))**2))) for phi, e in zip(d_phi,el)]
-
-    # construct pre-grid
-    hrtf_grid = [] 
-
-    for n in range(len(d_phi)):
-        tmp = np.arange(0, 360-d_phi[n]+1, d_phi[n])
-        for i in tmp:
-            hrtf_grid.append([i, el[n]])
-
-    #final grid in degree
-    hrtf_grid_deg = hrtf_grid
-    # estimated area weights using lat-long rectangles
-    weights = np.zeros((len(hrtf_grid_deg),1)) 
-    el_sort = np.sort(el)
-
-    for n in range(len(act_ang)):
-        if len(act_ang) == 1:
-            weight = 1
-
-        elif el_sort[n] == -90:
-            el_range = [-90, np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
-            weight   = quadarea(el_range[0], -180, el_range[1], 180)  
-
-        elif el_sort[n] == 90:
-            el_range = [90, np.mean(el_sort[n-1:n+1])] 
-            weight   = quadarea(el_range[0], -180, el_range[1], 180)
-
-        else:
-            if n == 0:
-                el_diff  = ( el_sort[n+1]-el_sort[n] ) / 2
-                el_range = el_sort[n] + [-el_diff, el_diff]
-                weight   = quadarea(el_range[0], 0, el_range[1], act_ang[n])
-            elif n == len(act_ang):
-                el_diff  = ( el_sort[n]-el_sort[n-1] ) / 2
-                el_range = el_sort[n] + [-el_diff, el_diff]
-                weight   = quadarea(el_range[0], 0, el_range[1], act_ang[n])
-            else:
-                # print(el_sort[n-1:n+1], el_sort[n:n+2])
-                el_range = [np.mean(el_sort[n-1:n+1]), np.mean(el_sort[n:n+2])]  # + 2 because of difference in indexing 
-                weight   = quadarea(el_range[0], 0, el_range[1], act_ang[n])
-        
-        hrtf_grid_deg = np.array(hrtf_grid_deg)
-        for i, element in enumerate(hrtf_grid_deg[:, 1]):
-            if element == el_sort[n]:
-                weights[i] = weight
-
-    weights = weights / sum(weights)
-
-    return [hrtf_grid_deg, act_ang_GCD, act_ang, weights]
-
-AKgreatCircleGrid()
-
-# %% quadarea
-def quadarea(lat1, lon1, lat2, lon2):
-    # h = np.sin(lat2)-np.sin(lat1)
-    # Az = 2 * np.pi * h
-    # Aq = Az * (lon2-lon1)/(2*np.pi)
-
-    A = (np.sin(np.deg2rad(lat2))-np.sin(np.deg2rad(lat1))) * np.deg2rad(lon2-lon1) / (4*np.pi)
-    return A
-
-quadarea(-90,-180,-89,180)
-
-# %% cart2sph
-def cart2sph(x, y, z):
-    hxy = np.hypot(x, y)
-    r = np.hypot(hxy, z)
-    el = np.arctan2(z, hxy)
-    az = np.arctan2(y, x)
-    return az, el, r
-
-# %% sph2cart
-def sph2cart(az, el, r):
-    rcos_theta = r * np.cos(el)
-    x = rcos_theta * np.cos(az)
-    y = rcos_theta * np.sin(az)
-    z = r * np.sin(el)
-    return x, y, z
-
 # %% AKsingle2bothSidedSpectrum
-# both_sided = AKsingle2bothSidedSpectrum(single_sided, is_even)
-#
-# can be used to switch back and forth between single and both sided
-# spectra, e.g.
-# y = AKboth2singleSidedSpectrum(x);
-# x = AKsingle2bothSidedSpectrum(y);
-#
 # Note that only the real part of the frequency bins at 0 Hz and Nyquist
 # #i.e. half the sampling rate) are considered before generating the both
 # sided spectrum.
