@@ -56,7 +56,7 @@ def hrtf(a, r, r_0, theta, f, c, threshold):
     H = np.zeros((len(f), len(theta)))
 
     # normalized distance - Eq. (5) in [1]
-    r_unique, idx = np.unique(r, return_index=True)
+    r_unique, idx = np.unique(r, return_inverse=True)
     rho = [r / a for r in r_unique]
     rho_0 = r_0 / a
     
@@ -122,8 +122,8 @@ def hrtf(a, r, r_0, theta, f, c, threshold):
  
     return H
 
-# %% AKsphericalHead
-def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False, r_0 = None, a = 0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
+# %% sphead
+def sphead(sg = sph_great_circle(), ear = [85, -13], offCenter = False, r_0 = None, a = 0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343):
     """calculates head-realated impulse responses (HRIRs) of a spherical head
         model with offset ears using the formulation from according to [1]. HRIRs
         are calculated by dividing the pressure on the sphere by the free field
@@ -186,17 +186,17 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
             - spherical head model parameters after translation and 
             changing the ear position (if applied)
 
-            ear: new ear position (see above)
-            sg: new sampling grid (see above)
-            r: radius for each point of sg
-            azRot: rotation above z-axis (azimuth) that was
+            ['ear']: new ear position (see above)
+            ['sg']: new sampling grid (see above)
+            ['r']: radius for each point of sg
+            ['azRot']: rotation above z-axis (azimuth) that was
                     applied to get the new ear azimuth
-            elRot: rotation above x-axis (elevation) that was
+            ['elRot']: rotation above x-axis (elevation) that was
                     applied to get the new ear elevation
-            xTrans: translation of the spherical head in x-
+            ['xTrans']: translation of the spherical head in x-
                     direction, that was applied to center the
                     interaural axis
-            zTrans: translation of the spherical head in z-
+            ['zTrans']: translation of the spherical head in z-
                     direction, that was applied to center the
                     interaural axis
                                     
@@ -339,31 +339,32 @@ def AKsphericalHead(sg = sph_great_circle(), ear = [85, -13], offCenter = False,
     if f[-1] == fs/2:
         H[-1,:] = abs(H[-1,:])
 
-    H = AKsingle2bothSidedSpectrum(H, 1 - Nsamples%2)
+    H = single2bothSpec(H, 1 - Nsamples%2)
     shtf = Signal(H, fs, Nsamples) 
-
+    
     # add delay to shift the pulses away from the very start
     shtf.time = np.roll(shtf.time, round(1.5e-3*fs), axis=0)
 
     # resort to match the desired sampling grid
-    h = np.zeros((Nsamples, sg.cshape[0], 2))
-    h[:,:,0] = shtf.time[:, gcdID[0:sg.cshape[0] ]]
-    h[:,:,1] = shtf.time[:, gcdID[sg.cshape[0] :]]
+    h = np.zeros((Nsamples, 2, sg.cshape[0]))
+    h[:,0,:] = shtf.time[:, gcdID[0:sg.cshape[0] ]]
+    h[:,1,:] = shtf.time[:, gcdID[sg.cshape[0] :]]
 
     shtf = Signal(h, fs, Nsamples) 
 
+    # reshape to desired output format
+    shtf.time = shtf.time.reshape((-1, 2, Nsamples))
+
     return shtf, offCenterParameter
-    
-# %% AKsingle2bothSidedSpectrum
-def AKsingle2bothSidedSpectrum(single_sided, is_even=1):
+
+# %% single2bothSpec
+def single2bothSpec(single_sided, is_even=1):
     """
     Parameters
     ----------
         single-sided: ndarray
-            - single sided spectrum , of size [N, M, C], where N is the
-            number of frequency bins, M the number of measurements
-            and C the number of channels. N must correspond to frequencies of 
-            0 <= f <= fs/2, where f is the sampling frequency
+            - single sided spectrum , of size [N, M], where N is the
+            number of frequency bins, M the number of measurements.
         is_even: int       
             - true if both sided spectrum had even number of taps (default).
             - if is_even > 1, it denotes the number of samples of the both 
@@ -396,3 +397,6 @@ def AKsingle2bothSidedSpectrum(single_sided, is_even=1):
     both_sided[0,:] = [float(i) for i in both_sided[0,:]]
 
     return both_sided
+
+
+# %%
