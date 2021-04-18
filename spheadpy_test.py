@@ -9,7 +9,7 @@ from pyfar import Signal
 from pyfar.coordinates import Coordinates
 from pyfar.spatial import samplings
 
-from HRTF import AKsphericalHead
+from HRTF import sphead
 
 def test_sph_great_circle_with_defaults():
     """Test sph_great_circle with default parameters."""
@@ -19,17 +19,20 @@ def test_sph_great_circle_with_defaults():
 
     assert isinstance(sg, Coordinates)
 
-def test_AKsphericalHead_with_defaults():
-    """Test AKsphericalHead with default paramters."""
+def test_sphead_with_defaults():
+    """Test sphead with default paramters."""
     sg = samplings.sph_great_circle(elevation=np.linspace(-90, 90, 19), gcd=10, radius=1,
                                     azimuth_res=1, match=360)
 
-    shtf, offCenterParameter = AKsphericalHead(sg, ear = [85, -13], offCenter = False, r_0 = None, 
+    shtf, offCenterParameter = sphead(sg, ear = [85, -13], offCenter = False, r_0 = None, 
                                                     a = 0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343)
 
     assert offCenterParameter == False
 
-    assert shtf.cshape == (1024, )
+    assert shtf.cshape == (440, 2)
+    assert shtf.time.shape == (440, 2, 1024)
+    assert shtf.n_samples == 1024
     assert shtf.sampling_rate == 44100
     assert shtf.fft_norm == "none"
-    
+
+test_sphead_with_defaults()
