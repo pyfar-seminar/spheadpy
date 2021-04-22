@@ -6,8 +6,8 @@ import pytest
 import os
 from pyfar import Signal
 
-from pyfar.coordinates import Coordinates
-from pyfar.spatial import samplings
+from pyfar import Coordinates
+from pyfar import samplings
 
 from HRTF import sphead
 
@@ -24,7 +24,7 @@ def test_sphead_with_defaults():
     sg = samplings.sph_great_circle(elevation=np.linspace(-90, 90, 19), gcd=10, radius=1,
                                     azimuth_res=1, match=360)
 
-    shtf, offCenterParameter = sphead(sg, ear = [85, -13], offCenter = False, r_0 = None, 
+    shtf, offCenterParameter = sphead(sg, ear = [85, -13], offCenter = False, r_0 = None,
                                                     a = 0.0875, Nsh = 100, Nsamples = 1024, fs = 44100, c = 343)
 
     assert offCenterParameter == False
